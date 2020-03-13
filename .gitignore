@@ -131,3 +131,5 @@ dmypy.json
 # Project specific ignores
 # test folder
 testing/
+# ignore data files
+data/
