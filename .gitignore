@@ -133,3 +133,5 @@ dmypy.json
 testing/
 # ignore data files
 data/
+# ignore vscode files
+.vscode/
