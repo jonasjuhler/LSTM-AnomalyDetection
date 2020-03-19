@@ -24,6 +24,7 @@ def load_data(dataset, basepath="../../"):
 
 
 if __name__ == '__main__':
+    """
     datasets = [
         "Wafer",
         "TwoLeadECG",
@@ -44,3 +45,6 @@ if __name__ == '__main__':
             print('Test data shape: ', test.shape, '\n')
         except FileNotFoundError as err:
             print(f"FileNotFoundError: {err}\n")
+    """
+
+    train, test = load_data("ItalyPowerDemand")
