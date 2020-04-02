@@ -135,3 +135,6 @@ testing/
 data/
 # ignore vscode files
 .vscode/
+
+# Misc folder
+.DS_Store
