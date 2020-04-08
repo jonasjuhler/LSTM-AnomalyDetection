@@ -5,8 +5,10 @@ import matplotlib.pyplot as plt
 from kongkat.dataload.generate_data import gendata
 from kongkat.model.vrasam import VRASAM
 
+anomaly = "Snow"
+
 ts_norm = gendata()
-ts_out, anom_range = gendata(outlier_type="Fault")
+ts_out, anom_range = gendata(outlier_type=anomaly)
 
 ts_normal = np.concatenate(2*[ts_norm])
 ts_outlier = np.concatenate([ts_norm]+[ts_out])
@@ -49,8 +51,8 @@ ax[1, 1].plot(x_hat_outlier[0])
 ax[0, 0].set_ylim((0, 1))
 ax[0, 1].set_ylim((0, 1))
 ax[0, 0].set_title('Ground truth')
-ax[0, 1].set_title('Snow')
+ax[0, 1].set_title(anomaly)
 ax[1, 0].set_title('Regenerated ground truth')
-ax[1, 1].set_title('Regenerated snow')
+ax[1, 1].set_title(f'Regenerated {anomaly.lower()}')
 
 plt.show()
