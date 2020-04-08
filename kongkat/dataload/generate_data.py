@@ -94,3 +94,8 @@ def gendata(T=96, outlier_type="None"):
         return energy, anom_start_stop
     else:
         return energy
+
+
+def data_generator(i=50):
+    for _ in range(i):
+        yield gendata()
