@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 from kongkat.dataload.generate_data import gendata
 from kongkat.model.vrasam import VRASAM
 
-anomaly = "Snow"
+anomaly = "Fault"
 
 ts_norm = gendata()
 ts_out, anom_range = gendata(outlier_type=anomaly)
@@ -37,6 +37,7 @@ mu_x_normal = output_normal["mu_x"].detach().numpy()
 b_x_normal = output_normal["b_x"].detach().numpy()
 mu_x_outlier = output_outlier["mu_x"].detach().numpy()
 b_x_outlier = output_outlier["b_x"].detach().numpy()
+
 
 # Sample reconstructed x from the given parameters
 x_hat_normal = np.random.laplace(loc=mu_x_normal, scale=b_x_normal)

@@ -79,6 +79,7 @@ class VRASAM(nn.Module):
         self.cell_state = torch.zeros(2, 1, self.h_dim)
 
     def forward(self, x):
+        # TODO: Add monte-carlo integration
         outputs = {}
 
         out_encoded, (hidden_T, _) = self.encoder(
@@ -154,3 +155,31 @@ class VRASAM(nn.Module):
         outputs["b_x"] = b_x
 
         return outputs
+    
+    
+def ELBO_loss(x, outputs, lambda_KL=1, eta_KL=1):
+    mu_x = outputs['mu_x']
+    b_x = outputs['b_x']
+    mu_z = outputs["mu_z"]
+    sigma_z = outputs["sigma_z"]
+    mu_c = outputs["mu_c"]
+    sigma_c = outputs["sigma_c"]
+    
+    pdf_laplace = torch.distributions.laplace.Laplace(mu_x, b_x)
+    likelihood = pdf_laplace.log_prob(x).mean(dim=1)
+    
+    kl_z = -0.5 * torch.sum(1 + torch.log(sigma_z**2) - mu_z**2 - sigma_z**2, dim=2)
+    kl_c = -0.5 * torch.sum(1 + torch.log(sigma_c**2) - mu_c**2 - sigma_c**2, dim=2)
+        
+    ELBO = -torch.mean(likelihood) + lambda_KL*kl_z + eta_KL*torch.mean(kl_c, dim=1)
+
+    
+    return ELBO
+    
+    
+    
+    
+    
+    
+    
+    
