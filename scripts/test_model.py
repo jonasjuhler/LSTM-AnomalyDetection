@@ -7,7 +7,7 @@ from kongkat.model.vrasam import VRASAM
 
 anomaly = "Fault"
 
-ts_norm = gendata()
+ts_norm, _ = gendata()
 ts_out, anom_range = gendata(outlier_type=anomaly)
 
 ts_normal = np.concatenate(2*[ts_norm])

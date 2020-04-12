@@ -3,47 +3,59 @@ import numpy as np
 
 def gendata(T=96, outlier_type="None"):
 
+    # Set the length of the peak to 65% of sequence length
+    peak_len = int(T*0.65)
+
     # Create spike for solar energy during day
-    peak = (np.sin(np.arange(-1/2*np.pi, -1/2*np.pi+(2*np.pi), 0.10)) + 1) / 2.2
-    peak_len = peak.shape[0]
+    peak = (np.sin(np.linspace(-1/2*np.pi, 3/2*np.pi, peak_len)) + 1) / 2.2
 
     # Define number of nighttime (no solar) timesteps
     nighttime = T - peak_len
     t = int((T - peak_len)//2)  # number of timesteps before peak starts
 
-    if outlier_type == "Snow":
-        # Create normal distributed noise instead of spike and insert
-        anomaly = np.random.randn(peak_len - 8) * 0.03 + 0.1
+    if outlier_type in ["Snow", "Cloud"]:
+        # Define length and normal dist. parameters based on outlier type
+        perc = 0.85 if outlier_type == "Snow" else 0.5
+        deviation = 0.03 if outlier_type == "Snow" else 0.1
+        increase = 0.1 if outlier_type == "Snow" else 0.5
+
+        # Create normal distributed noise instead of spike
+        anom_len = int(peak_len*perc)
+        anomaly = np.random.randn(anom_len) * deviation + increase
         anomaly[np.where(anomaly < 0)] = 0
-        peak[4:-4] = anomaly
-        anom_start_stop = (t+3, (t+4)+anomaly.shape[0])
-    elif outlier_type == "Cloud":
-        # Create normal distributed noise instead of spike and insert
-        anomaly = np.random.randn(peak_len - 32) * 0.1 + 0.5
-        anomaly[np.where(anomaly < 0)] = 0
-        peak[16:-16] = anomaly
-        anom_start_stop = (t+15, (t+16)+anomaly.shape[0])
+
+        # Insert anomaly into peak
+        cut = int((peak_len - anom_len) / 2)
+        anom_start_stop = (t+cut-1, t+cut+anom_len)
+        if (peak_len - anom_len) % 2 == 0:
+            peak[cut:-cut] = anomaly
+        else:
+            peak[cut:-(cut+1)] = anomaly
+
     elif outlier_type == "Fault":
-        # Set a random range of 10 values to 10 to simulate inverter fault
-        start = np.random.randint(10, peak_len-20)
-        stop = start+10
+        # Define length of anomaly
+        anom_len = int(peak_len*0.15)
+        # Set a random range of values to 0 to simulate inverter fault
+        start = np.random.randint(anom_len, peak_len-anom_len*2)
+        stop = start + anom_len
         peak[start:stop] = 0
         anom_start_stop = (t+start-1, t+stop)
-    elif outlier_type == "Spike":
-        # Choose random starting point for spike
-        start = np.random.randint(10, peak_len-20)
-        stop = start+10
-        step_start = int(
-            np.ceil(peak[start] / (peak[stop] + peak[start]) * 10))
-        step_stop = int(10 - step_start)
 
-        # Calculate step size
-        step_size_start = (peak[start] - 0.05) / step_start
-        step_size_stop = (0.05 - peak[stop]) / step_stop
+    elif outlier_type == "Spike":
+        # Define length of anomaly
+        anom_len = int(peak_len*0.15)
+        # Choose random starting point for spike
+        start = np.random.randint(anom_len, peak_len-anom_len*2)
+        stop = start + anom_len
+        start_h = peak[start]
+        stop_h = peak[stop-1]
+        start_height_weight = start_h / (stop_h + start_h)
+        start_steps = int(np.ceil(start_height_weight * anom_len))
+        stop_steps = int(anom_len - start_steps)
 
         # Create and insert spike
-        start_spike = np.arange(peak[start], 0.05, -step_size_start)
-        stop_spike = np.arange(0.05, peak[stop], -step_size_stop)
+        start_spike = np.linspace(start_h, 0.05, start_steps)
+        stop_spike = np.linspace(0.05, stop_h, stop_steps)
         spike = np.concatenate((start_spike, stop_spike))
         peak[start:stop] = spike
 
@@ -51,33 +63,34 @@ def gendata(T=96, outlier_type="None"):
 
     elif outlier_type == "Shade":
 
-        # Drop coefficient
-        d_coeff = 0.5
+        # Define length and drop amount of anomaly
+        anom_len = int(peak_len*0.15)
 
         # Choose random starting point for spike
-        start = np.random.randint(10, peak_len-20)
-        stop = start+10
-        step_start = int(
-            np.ceil(peak[start] / (peak[stop] + peak[start]) * 10))
-        step_stop = int(10 - step_start)
+        start = np.random.randint(anom_len, peak_len-(anom_len*2))
+        stop = start+anom_len
+        start_h = peak[start]
+        stop_h = peak[stop-1]
+        height_dist = start_h / (stop_h + start_h)
+        step_start = int(np.ceil(height_dist * anom_len))
+        step_stop = int(anom_len - step_start)
 
-        # Calculate step size
-        step_size_start = np.pi / step_start
-        step_size_stop = np.pi / step_stop
+        d_add = np.abs(start_h - stop_h)
+        d_coeff = 0.3 + d_add
 
         # Create and insert shade
-        start_spike = np.arange(1/2*np.pi, 3/2*np.pi, step_size_start)
-        stop_spike = np.arange(3/2*np.pi, 5/2*np.pi, step_size_stop)
+        start_spike = np.linspace(1/2*np.pi, 3/2*np.pi, step_start)
+        stop_spike = np.linspace(3/2*np.pi, 5/2*np.pi, step_stop)
 
         # Define height of starting and middle point
-        drop_start = d_coeff * (peak[start] / (peak[start] + peak[stop]))
-        lowest = peak[start] - drop_start
-        amp = (peak[start] - lowest)/2
-        start_spike = (amp*np.sin(start_spike) - amp + peak[start])
+        drop_start = d_coeff * height_dist
+        lowest = start_h - drop_start
+        amp = (start_h - lowest)/2
+        start_spike = (amp*np.sin(start_spike) - amp + start_h)
 
         # Define height of end point
-        amp = (peak[stop] - lowest)/2
-        stop_spike = (amp*np.sin(stop_spike) - amp + peak[stop])
+        amp = (stop_h - lowest)/2
+        stop_spike = (amp*np.sin(stop_spike) - amp + stop_h)
 
         spike = np.concatenate((start_spike, stop_spike))
         peak[start:stop] = spike
@@ -93,9 +106,26 @@ def gendata(T=96, outlier_type="None"):
     if outlier_type != "None":
         return energy, anom_start_stop
     else:
-        return energy
+        return energy, (t, t + peak_len)
 
 
 def data_generator(i=50):
     for _ in range(i):
         yield gendata()
+
+
+if __name__ == "__main__":
+    import matplotlib.pyplot as plt
+
+    types = ["None", "Snow", "Cloud", "Fault", "Spike", "Shade"]
+
+    fig, axes = plt.subplots(2, 3, figsize=(12, 8))
+
+    for i, ax in enumerate(axes.flatten()):
+        ts, (start, stop) = gendata(T=96, outlier_type=types[i])
+        ax.plot(ts)
+        ax.set_ylim(0, 1)
+        ax.set_title(types[i])
+        #ax.vlines([start, stop], 0, 1)
+
+    plt.show()
