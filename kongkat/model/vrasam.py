@@ -156,7 +156,7 @@ class VRASAM(nn.Module):
         return outputs
 
 
-def ELBO_loss(x, outputs, lambda_KL=1, eta_KL=1):
+def ELBO_loss(x, outputs, lambda_KL=0.01, eta_KL=0.01):
     mu_x = outputs['mu_x']
     b_x = outputs['b_x']
     mu_z = outputs["mu_z"]
