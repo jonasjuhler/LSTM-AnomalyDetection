@@ -103,15 +103,18 @@ def gendata(T=96, outlier_type="None"):
     else:
         energy = np.concatenate((np.zeros(t), peak, np.zeros(t+1)))
 
+    # Add noise
+    #energy += np.random.randn(energy.shape[0])*energy*0.1
+
     if outlier_type != "None":
         return energy, anom_start_stop
     else:
         return energy, (t, t + peak_len)
 
 
-def data_generator(i=50):
+def data_generator(i, T=96):
     for _ in range(i):
-        yield gendata()
+        yield gendata(T=T)
 
 
 if __name__ == "__main__":
