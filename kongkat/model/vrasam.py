@@ -75,8 +75,8 @@ class VRASAM(nn.Module):
         )
 
         # Initialize hidden state and cell state as learnable parameters
-        self.hidden_state = torch.zeros(2, 1, self.h_dim)
-        self.cell_state = torch.zeros(2, 1, self.h_dim)
+        self.hidden_state = torch.nn.Parameter(torch.zeros(2, 1, self.h_dim))
+        self.cell_state = torch.nn.Parameter(torch.zeros(2, 1, self.h_dim))
 
     def forward(self, x):
         # TODO: Add monte-carlo integration
@@ -171,8 +171,12 @@ def ELBO_loss(x, outputs, lambda_KL=1, eta_KL=1):
                             mu_z**2 - sigma_z**2, dim=2)
     kl_c = -0.5 * torch.sum(1 + torch.log(sigma_c**2) -
                             mu_c**2 - sigma_c**2, dim=2)
+    kl_c = torch.mean(kl_c, dim=1)
 
-    ELBO = -torch.mean(likelihood) + lambda_KL*kl_z + \
-        eta_KL*torch.mean(kl_c, dim=1)
+    ELBO = -torch.mean(likelihood) + lambda_KL*kl_z + eta_KL*kl_c
 
     return ELBO
+
+
+def similarity_score():
+    pass

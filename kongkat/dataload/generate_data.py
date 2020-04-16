@@ -104,7 +104,7 @@ def gendata(T=96, outlier_type="None"):
         energy = np.concatenate((np.zeros(t), peak, np.zeros(t+1)))
 
     # Add noise
-    #energy += np.random.randn(energy.shape[0])*energy*0.1
+    energy += np.random.randn(energy.shape[0])*energy*0.03
 
     if outlier_type != "None":
         return energy, anom_start_stop
