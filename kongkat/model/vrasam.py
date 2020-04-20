@@ -12,12 +12,13 @@ class VRASAM(nn.Module):
         self.x_dim = x_dim
         self.h_dim = h_dim
         self.batch_size = batch_size
+        self.init_hidden()
 
         # Everything going on in the network has to be of size:
         # (batch_size, T, n_features)
 
         # We encode the data onto the latent space using bi-directional LSTM
-        self.encoder = nn.LSTM(
+        self.LSTM_encoder = nn.LSTM(
             input_size=self.x_dim,
             hidden_size=self.h_dim,
             num_layers=1,
@@ -52,7 +53,7 @@ class VRASAM(nn.Module):
         )
 
         # The latent code must be decoded into the original image
-        self.decoder = nn.LSTM(
+        self.LSTM_decoder = nn.LSTM(
             input_size=self.z_dim*2,
             hidden_size=self.h_dim,
             num_layers=1,
@@ -74,75 +75,67 @@ class VRASAM(nn.Module):
             bias=True
         )
 
+    def init_hidden(self):
         # Initialize hidden state and cell state as learnable parameters
-        self.hidden_state = torch.nn.Parameter(torch.zeros(2, 1, self.h_dim))
-        self.cell_state = torch.nn.Parameter(torch.zeros(2, 1, self.h_dim))
+        self.hidden_state = torch.zeros(2, self.batch_size, self.h_dim)
+        self.cell_state = torch.zeros(2, self.batch_size, self.h_dim)
 
-    def forward(self, x):
-        # TODO: Add monte-carlo integration
-        outputs = {}
-
-        out_encoded, (hidden_T, _) = self.encoder(
+    def encoder(self, x):
+        out_encoded, (hidden_T, _) = self.LSTM_encoder(
             x, (self.hidden_state, self.cell_state))
-        flat_hidden_T = hidden_T.reshape(1, 1, 2*self.h_dim)
+        flat_hidden_T = hidden_T.reshape(self.batch_size, 1, 2*self.h_dim)
 
         # Fully connected layer from LSTM to var and mu
         mu_z = self.fnn_zmu(flat_hidden_T)
         sigma_z = nn.functional.softplus(self.fnn_zvar(flat_hidden_T))
 
-        # :- Reparametrisation trick
-        # a sample from N(mu, sigma) is mu + sigma * epsilon
-        # where epsilon ~ N(0, 1)
-
-        # Don't propagate gradients through randomness
-        with torch.no_grad():
-            epsilon_z = torch.randn(
-                self.batch_size, 1, self.z_dim)
-
-        # (batch_size, latent_dim) -> (batch_size, 1, latent_dim)
-        z = mu_z + epsilon_z * sigma_z
-
-        # Here goes the Variational Self-Attention Network
-
         # Calculate the similarity matrix
-        S = torch.zeros(self.batch_size, self.T, self.T)
-        for b in range(self.batch_size):
-            S[b] = torch.matmul(
-                out_encoded[b],
-                torch.transpose(out_encoded[b], 0, 1)
-            )
+        S = torch.matmul(
+            out_encoded,
+            torch.transpose(out_encoded, 1, 2)
+        )
 
         S = S / np.sqrt((2 * self.h_dim))
 
         # Use softmax to get the sum of weights to equal 1
         A = nn.functional.softmax(S, dim=2)
-
-        Cdet = torch.zeros(self.batch_size, self.T, 2*self.h_dim)
-
-        for b in range(self.batch_size):
-            Cdet[b] = torch.matmul(A[b], out_encoded[b])
+        Cdet = torch.matmul(A, out_encoded)
 
         # Fully connected layer from LSTM to var and mu
         mu_c = self.fnn_cmu(Cdet)
         sigma_c = nn.functional.softplus(self.fnn_cvar(Cdet))
 
-        # Don't propagate gradients through randomness
-        with torch.no_grad():
-            epsilon_c = torch.randn(
-                self.batch_size, self.T, self.z_dim)
+        return mu_z, sigma_z, mu_c, sigma_c
 
-        c = mu_c + epsilon_c * sigma_c
-
+    def decoder(self, c, z):
         # Concatenate z and c before giving it as input to the decoder
         z_cat = torch.cat(self.T*[z], dim=1)
         zc_concat = torch.cat((z_cat, c), dim=2)
 
         # Run through decoder
-        out_decoded, _ = self.decoder(zc_concat)
+        out_decoded, _ = self.LSTM_decoder(zc_concat)
 
         # Pass the decoder outputs through fnn to get LaPlace parameters
         mu_x = self.fnn_xmu(out_decoded)
         b_x = nn.functional.softplus(self.fnn_xb(out_decoded))
+
+        return mu_x, b_x
+
+    def forward(self, x):
+        # TODO: Add monte-carlo integration
+        outputs = {}
+
+        mu_z, sigma_z, mu_c, sigma_c = self.encoder(x)
+
+        # Don't propagate gradients through randomness
+        with torch.no_grad():
+            epsilon_z = torch.randn(self.batch_size, 1, self.z_dim)
+            epsilon_c = torch.randn(self.batch_size, self.T, self.z_dim)
+
+        z = mu_z + epsilon_z * sigma_z
+        c = mu_c + epsilon_c * sigma_c
+
+        mu_x, b_x = self.decoder(c, z)
 
         outputs["z"] = z
         outputs["mu_z"] = mu_z
@@ -155,6 +148,11 @@ class VRASAM(nn.Module):
 
         return outputs
 
+    def count_parameters(self):
+        n_grad = sum(p.numel() for p in self.parameters() if p.requires_grad)
+        n_total = sum(p.numel() for p in self.parameters())
+        return n_grad, n_total
+
 
 def ELBO_loss(x, outputs, lambda_KL=0.01, eta_KL=0.01):
     mu_x = outputs['mu_x']
@@ -164,19 +162,43 @@ def ELBO_loss(x, outputs, lambda_KL=0.01, eta_KL=0.01):
     mu_c = outputs["mu_c"]
     sigma_c = outputs["sigma_c"]
 
+    # Initialize Laplace with given parameters.
     pdf_laplace = torch.distributions.laplace.Laplace(mu_x, b_x)
-    likelihood = pdf_laplace.log_prob(x).mean(dim=1)
+    # Calculate mean of likelihood over T and x-dimension.
+    likelihood = pdf_laplace.log_prob(x).mean(dim=1).mean(dim=1)
 
-    kl_z = -0.5 * torch.sum(1 + torch.log(sigma_z**2) -
-                            mu_z**2 - sigma_z**2, dim=2)
-    kl_c = -0.5 * torch.sum(1 + torch.log(sigma_c**2) -
-                            mu_c**2 - sigma_c**2, dim=2)
-    kl_c = torch.mean(kl_c, dim=1)
+    # Calculate KL-divergence of p(c) and q(z)
+    v_z = sigma_z**2  # Variance of q(z)
+    v_c = sigma_c**2  # Variance of p(c)
+    kl_z = -0.5 * torch.sum(1 + torch.log(v_z) - mu_z**2 - v_z, dim=2)
+    kl_c = -0.5 * torch.sum(1 + torch.log(v_c) - mu_c**2 - v_c, dim=2)
 
-    ELBO = -torch.mean(likelihood) + lambda_KL*kl_z + eta_KL*kl_c
+    kl_c = torch.sum(kl_c, dim=1)  # Sum over the T dimension.
+    kl_z = kl_z[:, 0]  # Get rid of extra x_dim dimension.
 
-    return ELBO
+    # Calculate the Evidence Lower Bound (ELBO)
+    ELBO = -likelihood + (lambda_KL * kl_z) + (eta_KL * kl_c)
+
+    # Return mean over all batches
+    return torch.mean(ELBO, dim=0)
 
 
-def similarity_score():
-    pass
+def similarity_score(net, x, L):
+
+    with torch.no_grad():
+        # Pass sequence through encoder to get params in q(z) and p(c)
+        mu_z, sigma_z, mu_c, sigma_c = net.encoder(x)
+        score = 0
+
+        for _ in range(L):
+            # Sample a random z vector and reparametrize
+            epsilon_z = torch.randn(net.batch_size, 1, net.z_dim)
+            z = mu_z + epsilon_z * sigma_z
+
+            # Pass sample through decoder and calculate reconstruction prob
+            mu_x, b_x = net.decoder(mu_c, z)
+            pdf_laplace = torch.distributions.laplace.Laplace(mu_x, b_x)
+            score += pdf_laplace.log_prob(x)
+
+        # Average over number of iterations
+        return score/L
